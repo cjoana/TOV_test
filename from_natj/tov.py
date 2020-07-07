@@ -45,6 +45,9 @@ class tov:
         m = 4.0*pi*r[0]**3*eden
 
         psol = odeint(self.tov, [P, m], r, rtol=1.0e-4, atol=1.0e-4)
+
+        press = psol[:,0]
+        print(press)
         return r, psol[:,0], psol[:,1]
 
     def mass_radius(self):
