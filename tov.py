@@ -43,7 +43,8 @@ class eos:
 
     # energy density_adm = density * (1 + energy)
     def rho_from_density(self, density):
-        return (1.0 + self.a) * density + (self.K / (self.G - 1)) * density ** self.G
+        # return (1.0 + self.a) * density + (self.K / (self.G - 1)) * density ** self.G
+        return density + (self.K / (self.G - 1)) * density ** self.G
 
     # for inverse functions lets define  density (P)
     def density_from_pressure(self, pressure):
@@ -64,11 +65,11 @@ class tov:
         self.physical_eos = peos
         self.r0 = r0
         self.rf = rf
-        self.verbose= verbose
+        self.verbose = verbose
 
 
     def tov(self, y, r):
-        P, mass, lna, lnpsi = y
+        P, mass, lna = y
         rho = self.physical_eos.density_from_pressure(P)
 
         dPdr = -nu.G * (rho + P / nu.c ** 2) * (mass + 4.0 * pi * r ** 3 * P / nu.c ** 2)
@@ -76,12 +77,11 @@ class tov:
         dmdr = 4.0 * pi * r ** 2 * rho
 
         dlnadr = (mass + 4*pi*r**3*P)/ (r * (r - 2.0 * nu.G * mass / nu.c ** 2))
-        dlnpsidr = (r**0.5 - (r - 2.0 * nu.G * mass / nu.c ** 2)**0.5) / (r * (r - 2.0 * nu.G * mass / nu.c ** 2)**0.5)
 
-        return [dPdr, dmdr, dlnadr, dlnpsidr]
+        return [dPdr, dmdr, dlnadr]
 
     def tov_ivp(self, r, y):
-        P, mass, lna, lnpsi = y
+        P, mass, lna = y
         rho = self.physical_eos.density_from_pressure(P)
 
         dPdr = -nu.G * (rho + P / nu.c ** 2) * (mass + 4.0 * pi * r ** 3 * P / nu.c ** 2)
@@ -89,18 +89,19 @@ class tov:
         dmdr = 4.0 * pi * r ** 2 * rho
 
         dlnadr = (mass + 4*pi*r**3*P)/ (r * (r - 2.0 * nu.G * mass / nu.c ** 2))
-        dlnpsidr = 0#*(r**0.5 - (r - 2.0 * nu.G * mass / nu.c ** 2)**0.5) / (r * (r - 2.0 * nu.G * mass / nu.c ** 2)**0.5)
 
-        return [dPdr, dmdr, dlnadr, dlnpsidr]
+        return [dPdr, dmdr, dlnadr]
 
     def ode_radius(self, r, y):
         lapse0, psi0 = y
         P = self.pressure_from_radius(r)
         mass = self.mass_from_radius(r)
         dlnadr = (mass + 4 * pi * r ** 3 * P) / (r * (r - 2.0 * nu.G * mass / nu.c ** 2))
-        dlnpsidr = (r**0.5 - (r - 2.0 * nu.G * mass / nu.c ** 2)**0.5) / (r * (r - 2.0 * nu.G * mass / nu.c ** 2)**0.5)
+        lamb = (r**0.5 - (r - 2.0 * nu.G * mass / nu.c ** 2)**0.5) / (r * (r - 2.0 * nu.G * mass / nu.c ** 2)**0.5)
 
-        return [dlnadr, dlnpsidr]
+        # print(dlnadr)
+
+        return [dlnadr, lamb]
 
     def tovsolve(self, density_central):
 
@@ -111,32 +112,28 @@ class tov:
         rho_0 = self.physical_eos.density_from_pressure(P_0)
         mass_0 = 4.0 * pi * r[0] ** 3 * rho_0
         lna_0 = 1
-        lnpsi_0 = -10
-
 
         # intmethod = "odeint"
         intmethod = "ivp"  # does not work for sys of diff.eqs ???
 
         if intmethod == "odeint":
-            psol = odeint(self.tov, [P_0, mass_0, lna_0, lnpsi_0], r, t)  # , rtol=1.0e-4, atol=1.0e-4)
+            psol = odeint(self.tov, [P_0, mass_0, lna_0], r, t)  # , rtol=1.0e-4, atol=1.0e-4)
             press = psol[:, 0]
             mass = psol[:, 1]
             lna_old = psol[:, 2]
-            lnpsi_old = psol[:, 3]
         elif intmethod == "ivp":
-            sol = solve_ivp(self.tov_ivp, [r0, rf], [P_0, mass_0, lna_0, lnpsi_0])
+            sol = solve_ivp(self.tov_ivp, [r0, rf], [P_0, mass_0, lna_0])
             r = sol.t
-            rrange = 10.0**np.linspace(np.log10(r[0]), np.log10(r[-1]), N)
-            sol = solve_ivp(self.tov_ivp, [r0, rf], [P_0, mass_0, lna_0, lnpsi_0], t_eval=rrange)
+            rrange = 10.0 ** np.linspace(np.log10(r[0]), np.log10(r[-1]), N)
+            sol = solve_ivp(self.tov_ivp, [r0, rf], [P_0, mass_0, lna_0], t_eval=rrange)
             r = sol.t
             press = sol.y[0]
             mass = sol.y[1]
             lna_old = sol.y[2]
-            lnpsi_old = sol.y[3]
         else:
             return "error"
 
-        return r, press, mass, lna_old, lnpsi_old
+        return r, press, mass, lna_old
 
     def mass_radius(self): #TODO: not useful
         N = 10
@@ -149,7 +146,7 @@ class tov:
         mass_max = 0.0
         j = 0
         for rhoc in rhocs:
-            rad, press, mass, lna, lnpsi = self.tovsolve(rhoc)
+            rad, press, mass, lna = self.tovsolve(rhoc)
 
             # rad /= 1.0e5  # cm to km
             # mass /= nu.Msun
@@ -177,7 +174,7 @@ class tov:
 
     def solve_with_atm(self, density_central):
 
-        rad, press, mass, lna_old, lnpsi_old = self.tovsolve(density_central)
+        rad, press, mass, lna = self.tovsolve(density_central)
 
         atm_indx = []
         p_min = np.max(press)
@@ -190,50 +187,51 @@ class tov:
                 atm_indx.append(i)
 
         # add atmosphere
-        press[atm_indx] = p_min * 0.001
-        print("p d atm", p_min * 0.001)
+        # press_atm = p_min * 0.1 if p_min * 0.1 >= 1e-8 else 1e-8
+        press[atm_indx] = p_min * 0.1
+        print("p d atm", p_min * 0.1)
         # def radius and mass of star
         star_lim = atm_indx[0]-1
-        r_star = rad[star_lim]
-        mass_star = rad[star_lim+1]
+        rad_star = rad[star_lim]
+        mass_star = mass[star_lim+1]
 
         density = physical_eos.densities_from_pressure(press)
         rho = physical_eos.rho_from_density(density)
         energy = (K * density ** (G - 1)) / (G - 1)
+        chi = (1 - 2 * mass / rad)   # gamma_rr **-1
 
-        # chi_old = (1 - 2*mass/rad)
-        # chi = np.exp(lnpsi)**2
-        # chi = chi_old
-
-        pressure_from_radius = interp1d(rad, press, bounds_error=False, fill_value='extrapolate')
-        mass_from_radius = interp1d(rad, mass, bounds_error=False, fill_value='extrapolate')
-        self.pressure_from_radius = pressure_from_radius
-        self.mass_from_radius = mass_from_radius
-
-        lna_0 = np.log(1 - 2 * mass_star/rad[-1])
-        lamb_0 = - 0.5*lna_0
-
-        r0, rf = [self.r0, self.rf]
-        sol = solve_ivp(self.ode_radius, [rf, r0], [lna_0, -lamb_0], t_eval=rad[::-1])
-        lna = sol.y[0][::-1]
-        Lamb = - sol.y[1][::-1]  # rh = r * exp(- Lamb) ;; chi = exp(-2*Lamb)
-
-        if not np.all(sol.t[::-1] == rad):
-            print(sol.t)
-            print(rad)
-            raise ValueError("radius do not match")
-
-        lna = lna_old
-
-        # chi = np.exp(-2 * Lamb)
-        chi = (1 - 2 * mass/rad)
-        rad_iso = rad * np.exp(- Lamb)
-        rad = rad_iso  ## convert to isotropic cordinates,  radius
-
-        # print(chi_old - chi)
-        # lnpsi = lnpsi - np.min(lnpsi)
-        # print(lnpsi)
-
+        # # chi_old = (1 - 2*mass/rad)
+        # # chi = np.exp(lnpsi)**2
+        # # chi = chi_old
+        #
+        # pressure_from_radius = interp1d(rad, press, bounds_error=False, fill_value='extrapolate')
+        # mass_from_radius = interp1d(rad, mass, bounds_error=False, fill_value='extrapolate')
+        # self.pressure_from_radius = pressure_from_radius
+        # self.mass_from_radius = mass_from_radius
+        #
+        # lna_0 =  np.log(1 - 2 * mass_star/rad[-1])
+        # lamb_0 = - 0.5*lna_0
+        #
+        # r0, rf = [self.r0, self.rf]
+        # sol = solve_ivp(self.ode_radius, [rf, r0], [lna_0, -lamb_0], t_eval=rad[::-1])
+        # lna = sol.y[0][::-1]
+        # Lamb = - sol.y[1][::-1]  # rh = r * exp(- Lamb) ;; chi = exp(-2*Lamb)
+        #
+        # # lna = -2*Lamb
+        #
+        # print(np.exp(lna_0),  np.exp(lna))
+        #
+        # if not np.all(sol.t[::-1] == rad):
+        #     print(sol.t)
+        #     print(rad)
+        #     raise ValueError("radius do not match")
+        #
+        # # lna = lna_old
+        #
+        # # chi = np.exp(-2 * Lamb)
+        # chi = (1 - 2 * mass/rad)
+        # rad_iso = rad * np.exp(- Lamb)
+        # rad = rad_iso  ## convert to isotropic cordinates,  radius
 
 
         out = dict()
@@ -247,8 +245,8 @@ class tov:
         out['rad'] = rad
 
         other = dict()
-        other['rad_star'] = rad[atm_indx]
-        other['mass_star'] = mass[-1]
+        other['rad_star'] = rad_star
+        other['mass_star'] = mass_star
 
         return out, other
 
@@ -261,10 +259,13 @@ if __name__ == "__main__":
 
     plt.rcParams.update({'font.size': 22})
 
-    K = 0.1
+    K = 0.03
     G = 4./3
     omega = G - 1
-    density_central = 1e-2
+    density_central = 0.001
+
+    create_data = True
+    # create_data = False
 
     physical_eos = eos(K, G)
     # eos = glue_crust_and_core(SLyCrust, dense_eos)
@@ -298,10 +299,10 @@ if __name__ == "__main__":
 
     out, other = t.solve_with_atm(density_central)
 
-    rad_star = other['rad_star'][0]
+    rad_star = other['rad_star']
     putL = int(np.log10(rad_star))+1
 
-    print("R star less than", 10**putL, "  app.", other['rad_star'][0])
+    print("R star less than", 10**putL, "  app.", other['rad_star'])
     print("M star is  ", other['mass_star'])
 
     nplots = 7
@@ -321,8 +322,8 @@ if __name__ == "__main__":
 
 
     for ax in axs[:]:
-        # ax.set_yscale('log')
-        # ax.set_xscale('log')
+        ax.set_yscale('log')
+        ax.set_xscale('log')
         xmin = out['rad'][0] if  out['rad'][0] > 0.01 else 0.01
         ax.set_xlim( xmin, 10**putL)
         ax.legend()
@@ -334,13 +335,14 @@ if __name__ == "__main__":
 
 
     ##### Create data
-    create_data = True
     if create_data:
 
-        N = 120
+        N = 128
         L = 10**putL
-        dt_multiplier = 0.01
+        dt_multiplier = 0.0001
         periodic_BCs = False
+
+        print("creating data with domain: L = {},  N = {}".format(L, N))
 
         radius = out["rad"]
         f_density = interp1d(radius, out['density'], bounds_error=False, fill_value='extrapolate')
@@ -556,5 +558,7 @@ if __name__ == "__main__":
             l0.create_dataset("data:datatype=0", data=fdset)
 
             h5file.close()
+
+            print("Done!")
 
 
